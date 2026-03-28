@@ -1,66 +1,64 @@
 import streamlit as st
 import requests
-from datetime import datetime, timedelta
 
 # --- CONFIGURACIÓN ---
 st.set_page_config(page_title="SAVC Auditor Final", layout="centered")
 
-st.title("📡 Extractor de Emergencia SAVC")
+st.title("📡 Extractor de Fondo SAVC")
 st.write("### Estación: 87860 (Comodoro Rivadavia)")
 
 # --- SIDEBAR ---
 with st.sidebar:
-    st.header("Parámetros")
-    horas_atras = st.slider("Horas de historial:", 1, 48, 24)
-    btn_buscar = st.button("🔍 Forzar Escaneo")
+    st.header("Control de Extracción")
+    n_reportes = st.slider("Cantidad de reportes a recuperar:", 10, 100, 50)
+    btn_forzar = st.button("🔥 Forzar Extracción de Buffer")
     st.divider()
-    st.caption("Fuente: Iowa State University (IEM)")
+    st.caption("Esta función busca en la memoria profunda del servidor.")
 
-# --- MOTOR DE BÚSQUEDA ---
-def traer_datos_iem(hrs):
-    ahora = datetime.utcnow()
-    hace_x_horas = ahora - timedelta(hours=hrs)
+# --- MOTOR DE BÚSQUEDA (BUFFER RECENT) ---
+def extraer_buffer_ogimet(cantidad):
+    # Esta URL pide los últimos N reportes SYNOP de la estación, sin filtrar por fecha
+    url = f"https://www.ogimet.com/display_metars2.php?lang=en&lugar=87860&tipo=synop&fmt=txt&send=send&max={cantidad}"
     
-    # URL de acceso directo a los logs de texto plano del IEM
-    url = (f"https://mesonet.agron.iastate.edu/cgi-bin/request/asis.py?"
-           f"station=SAVC&data=metar&"
-           f"year1={hace_x_horas.year}&month1={hace_x_horas.month}&day1={hace_x_horas.day}&hour1={hace_x_horas.hour}&minute1=0&"
-           f"year2={ahora.year}&month2={ahora.month}&day2={ahora.day}&hour2={ahora.hour}&minute2=59")
-    
-    headers = {'User-Agent': 'Mozilla/5.0'}
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0'
+    }
     
     try:
-        r = requests.get(url, timeout=20)
+        r = requests.get(url, headers=headers, timeout=25)
         if r.status_code == 200:
-            # Limpiamos líneas vacías o encabezados
-            lineas = [l.strip() for l in r.text.split('\n') if len(l) > 20]
+            # Buscamos las líneas que tengan el ID 87860
+            lineas = [l.strip() for l in r.text.split('\n') if "87860" in l and len(l) > 30]
             return lineas
     except:
         return None
     return []
 
 # --- LÓGICA DE SALIDA ---
-if btn_buscar:
-    with st.spinner("Buscando en los logs de Iowa State..."):
-        reportes = traer_datos_iem(horas_atras)
+if btn_forzar:
+    with st.spinner("Accediendo al buffer de Ogimet..."):
+        reportes = extraer_buffer_ogimet(n_reportes)
         
         if reportes:
-            st.success(f"✅ ¡Datos recuperados! {len(reportes)} registros encontrados.")
+            st.success(f"✅ ¡Éxito! Se recuperaron {len(reportes)} registros del historial.")
             
-            # Mostramos las tiras
             for i, reporte in enumerate(reportes):
-                # Intentamos identificar si es SYNOP o METAR
-                tipo = "SYNOP / RAW" if "87860" in reporte else "METAR / SPECI"
-                st.info(f"📄 Registro #{i+1} - {tipo}")
+                # Extraer fecha/hora del reporte para el título
+                # Ogimet pone AAAAMMDDHHMM al principio
+                try:
+                    fecha_str = f"{reporte[6:8]}/{reporte[4:6]} {reporte[8:10]}:{reporte[10:12]} UTC"
+                except:
+                    fecha_str = f"Registro {i+1}"
+                
+                st.info(f"🕒 **Reporte: {fecha_str}**")
                 st.code(reporte, language="text")
                 
-            # Botón de descarga
-            st.download_button("📥 Descargar Log Completo", "\n".join(reportes), "auditoria_savc.txt")
+            st.download_button("📥 Descargar Buffer", "\n".join(reportes), "buffer_savc.txt")
         else:
-            st.error("⚠️ El servidor de Iowa tampoco tiene registros recientes para SAVC.")
-            st.warning("Si esto persiste, es una caída total del nodo de comunicaciones del SMN hacia el exterior.")
+            st.error("❌ El buffer de Ogimet para la 87860 está vacío.")
+            st.warning("Esto confirma que la estación SAVC no está inyectando datos a la red internacional (GTS) en este momento.")
 else:
-    st.info("Elegí el rango de horas y presioná 'Forzar Escaneo'.")
+    st.info("Presioná el botón para intentar recuperar los últimos reportes guardados en el servidor.")
 
 st.divider()
-st.caption("SAVC 87860 - Auditoría de Despacho v3.0")
+st.caption("SAVC 87860 - Auditoría v4.0 (Buffer Mode)")
