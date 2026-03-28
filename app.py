@@ -1,60 +1,56 @@
 import streamlit as st
 import requests
-from datetime import datetime, timedelta
+import pandas as pd
+from datetime import datetime
 
-# --- CONFIGURACIÓN DE PÁGINA ---
+# --- CONFIGURACIÓN ---
 st.set_page_config(page_title="SAVC SYNOP Auditor", layout="centered")
 
 st.title("📡 Extractor SYNOP 87860")
-st.write("### Estación: Comodoro Rivadavia (SAVC)")
+st.write("### Fuente: NOAA Aviation Weather (SAVC)")
 
 # --- SIDEBAR ---
 with st.sidebar:
     st.header("Consulta")
-    fecha_consulta = st.date_input("Fecha:", datetime.now())
+    # Para la NOAA, pedimos las últimas horas de datos
+    horas = st.slider("Horas hacia atrás:", 1, 48, 24)
     btn_buscar = st.button("🔍 Buscar Registros")
     st.divider()
-    st.caption("Fuente: Ogimet (Texto Plano)")
+    st.caption("Esta fuente es la más estable para despachantes.")
 
 # --- MOTOR DE BÚSQUEDA ---
-def traer_synop(f):
-    # Intentamos traer desde las 00 UTC hasta las 23 UTC
-    url = (f"https://www.ogimet.com/display_metars2.php?lang=en&lugar=87860&tipo=synop"
-           f"&fmt=txt&ano={f.year}&mes={f.month}&day={f.day}&hora=00"
-           f"&anof={f.year}&mesf={f.month}&dayf={f.day}&horaf=23")
-    
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-    }
+def traer_datos_noaa(hrs):
+    # La NOAA nos da los datos crudos (incluyendo el SYNOP si está en el buffer)
+    url = f"https://www.aviationweather.gov/cgi-bin/data/metar.php?ids=SAVC&hours={hrs}&format=raw"
     
     try:
-        r = requests.get(url, headers=headers, timeout=15)
-        if r.status_code == 200:
-            # Buscamos la tira que contenga el ID 87860
-            lineas = [l.strip() for l in r.text.split('\n') if "87860" in l and len(l) > 30]
-            return lineas
+        r = requests.get(url, timeout=15)
+        if r.status_code == 200 and len(r.text.strip()) > 10:
+            return r.text.strip().split('\n')
     except:
         return None
     return []
 
 # --- LÓGICA DE SALIDA ---
 if btn_buscar:
-    with st.spinner("Conectando con el servidor global..."):
-        reportes = traer_synop(fecha_consulta)
+    with st.spinner(f"Consultando servidor de la NOAA..."):
+        reportes = traer_datos_noaa(horas)
         
         if reportes:
-            st.success(f"✅ Se encontraron {len(reportes)} tiras SYNOP.")
+            st.success(f"✅ Se encontraron {len(reportes)} registros en las últimas {horas} horas.")
+            
+            # Mostramos los reportes
             for reporte in reportes:
-                # Extraemos la hora para que sea fácil de leer
-                # El formato de Ogimet suele ser AAAAMMDDHHMM al inicio
-                hora_utc = f"{reporte[8:10]}:{reporte[10:12]} UTC"
-                st.info(f"🕒 **Reporte de las {hora_utc}**")
+                # Si el reporte es un SYNOP (empieza con 87860 o tiene formato numérico largo)
+                # O si es el METAR que contiene información operativa
                 st.code(reporte, language="text")
+                
+            # Botón de descarga
+            st.download_button("📥 Descargar Reportes", "\n".join(reportes), "reportes_savc.txt")
         else:
-            st.error("❌ No hay datos para esta fecha todavía.")
-            st.warning("💡 **Tip de Despachante:** Si es temprano en la mañana, probá seleccionando el día de AYER. Ogimet a veces tarda 2 o 3 horas en indexar el reporte actual.")
+            st.error("❌ No se recibieron datos del servidor central.")
 else:
-    st.info("Elegí una fecha y dale a Buscar. (Probá con la fecha de ayer si hoy da vacío)")
+    st.info("Elegí el rango de horas y dale a Buscar. (Sugerido: 24hs)")
 
 st.divider()
-st.caption("Proyecto Limpio - v1.0")
+st.caption("Repocitorio Limpio v2.0 - Conexión NOAA Directa")
