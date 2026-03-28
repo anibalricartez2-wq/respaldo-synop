@@ -1,56 +1,66 @@
 import streamlit as st
 import requests
-import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # --- CONFIGURACIÓN ---
-st.set_page_config(page_title="SAVC SYNOP Auditor", layout="centered")
+st.set_page_config(page_title="SAVC Auditor Final", layout="centered")
 
-st.title("📡 Extractor SYNOP 87860")
-st.write("### Fuente: NOAA Aviation Weather (SAVC)")
+st.title("📡 Extractor de Emergencia SAVC")
+st.write("### Estación: 87860 (Comodoro Rivadavia)")
 
 # --- SIDEBAR ---
 with st.sidebar:
-    st.header("Consulta")
-    # Para la NOAA, pedimos las últimas horas de datos
-    horas = st.slider("Horas hacia atrás:", 1, 48, 24)
-    btn_buscar = st.button("🔍 Buscar Registros")
+    st.header("Parámetros")
+    horas_atras = st.slider("Horas de historial:", 1, 48, 24)
+    btn_buscar = st.button("🔍 Forzar Escaneo")
     st.divider()
-    st.caption("Esta fuente es la más estable para despachantes.")
+    st.caption("Fuente: Iowa State University (IEM)")
 
 # --- MOTOR DE BÚSQUEDA ---
-def traer_datos_noaa(hrs):
-    # La NOAA nos da los datos crudos (incluyendo el SYNOP si está en el buffer)
-    url = f"https://www.aviationweather.gov/cgi-bin/data/metar.php?ids=SAVC&hours={hrs}&format=raw"
+def traer_datos_iem(hrs):
+    ahora = datetime.utcnow()
+    hace_x_horas = ahora - timedelta(hours=hrs)
+    
+    # URL de acceso directo a los logs de texto plano del IEM
+    url = (f"https://mesonet.agron.iastate.edu/cgi-bin/request/asis.py?"
+           f"station=SAVC&data=metar&"
+           f"year1={hace_x_horas.year}&month1={hace_x_horas.month}&day1={hace_x_horas.day}&hour1={hace_x_horas.hour}&minute1=0&"
+           f"year2={ahora.year}&month2={ahora.month}&day2={ahora.day}&hour2={ahora.hour}&minute2=59")
+    
+    headers = {'User-Agent': 'Mozilla/5.0'}
     
     try:
-        r = requests.get(url, timeout=15)
-        if r.status_code == 200 and len(r.text.strip()) > 10:
-            return r.text.strip().split('\n')
+        r = requests.get(url, timeout=20)
+        if r.status_code == 200:
+            # Limpiamos líneas vacías o encabezados
+            lineas = [l.strip() for l in r.text.split('\n') if len(l) > 20]
+            return lineas
     except:
         return None
     return []
 
 # --- LÓGICA DE SALIDA ---
 if btn_buscar:
-    with st.spinner(f"Consultando servidor de la NOAA..."):
-        reportes = traer_datos_noaa(horas)
+    with st.spinner("Buscando en los logs de Iowa State..."):
+        reportes = traer_datos_iem(horas_atras)
         
         if reportes:
-            st.success(f"✅ Se encontraron {len(reportes)} registros en las últimas {horas} horas.")
+            st.success(f"✅ ¡Datos recuperados! {len(reportes)} registros encontrados.")
             
-            # Mostramos los reportes
-            for reporte in reportes:
-                # Si el reporte es un SYNOP (empieza con 87860 o tiene formato numérico largo)
-                # O si es el METAR que contiene información operativa
+            # Mostramos las tiras
+            for i, reporte in enumerate(reportes):
+                # Intentamos identificar si es SYNOP o METAR
+                tipo = "SYNOP / RAW" if "87860" in reporte else "METAR / SPECI"
+                st.info(f"📄 Registro #{i+1} - {tipo}")
                 st.code(reporte, language="text")
                 
             # Botón de descarga
-            st.download_button("📥 Descargar Reportes", "\n".join(reportes), "reportes_savc.txt")
+            st.download_button("📥 Descargar Log Completo", "\n".join(reportes), "auditoria_savc.txt")
         else:
-            st.error("❌ No se recibieron datos del servidor central.")
+            st.error("⚠️ El servidor de Iowa tampoco tiene registros recientes para SAVC.")
+            st.warning("Si esto persiste, es una caída total del nodo de comunicaciones del SMN hacia el exterior.")
 else:
-    st.info("Elegí el rango de horas y dale a Buscar. (Sugerido: 24hs)")
+    st.info("Elegí el rango de horas y presioná 'Forzar Escaneo'.")
 
 st.divider()
-st.caption("Repocitorio Limpio v2.0 - Conexión NOAA Directa")
+st.caption("SAVC 87860 - Auditoría de Despacho v3.0")
